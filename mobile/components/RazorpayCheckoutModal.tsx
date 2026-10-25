@@ -5,9 +5,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
+  Platform,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, fonts, fontSize, spacing } from '../theme';
@@ -39,9 +42,20 @@ export default function RazorpayCheckoutModal({
   onCancel,
   onFailure,
 }: RazorpayCheckoutModalProps) {
+  const insets = useSafeAreaInsets();
   const [loadingOrder, setLoadingOrder] = useState(false);
   const [paymentHtml, setPaymentHtml] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
+
+  // Robust safe area insets for Android and iOS
+  const topInset = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (RNStatusBar.currentHeight || 28) : 20
+  );
+  const bottomInset = Math.max(
+    insets.bottom,
+    Platform.OS === 'android' ? 28 : 20
+  );
 
   const buildRazorpayHtml = (order: any) => {
     const cleanPhone = (userPhone || '').replace(/\D/g, '').slice(-10) || '9999999999';
@@ -61,8 +75,9 @@ export default function RazorpayCheckoutModal({
     };
 
     const optionsJson = JSON.stringify(options).replace(/</g, '\\u003c');
-    return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />`
-      + `<script src="https://checkout.razorpay.com/v1/checkout.js"></script></head><body style="margin:0;background:#ffffff;">`
+    return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />`
+      + `<style>html,body{margin:0;padding:0;background:#ffffff;height:100%;overflow:hidden;}</style>`
+      + `<script src="https://checkout.razorpay.com/v1/checkout.js"></script></head><body>`
       + `<script>var options=${optionsJson};`
       + `options.handler=function(r){window.ReactNativeWebView.postMessage(JSON.stringify({status:'success',razorpay_payment_id:r.razorpay_payment_id,razorpay_order_id:r.razorpay_order_id,razorpay_signature:r.razorpay_signature}));};`
       + `options.modal={ondismiss:function(){window.ReactNativeWebView.postMessage(JSON.stringify({status:'dismissed'}));}};`
@@ -84,7 +99,7 @@ export default function RazorpayCheckoutModal({
       try {
         setLoadingOrder(true);
         setInitError(null);
-        // Create native Razorpay order identical to patient_matters
+        // Create native Razorpay order
         const order = await ordersService.createRazorpayOrder(amount, {
           receipt: `rcpt_${Date.now()}`,
           notes: {
@@ -138,57 +153,79 @@ export default function RazorpayCheckoutModal({
       animationType="slide"
       transparent={false}
       onRequestClose={onCancel}
+      statusBarTranslucent={false}
     >
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header Bar identical to patient_matters */}
+      <StatusBar style="dark" />
+      <View
+        style={[
+          styles.safeAreaContainer,
+          {
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
+        ]}
+      >
+        {/* Header Bar */}
         <View style={styles.headerBar}>
           <View style={styles.headerTitleRow}>
             <MaterialCommunityIcons name="shield-check" size={20} color={colors.primary} />
             <Text style={styles.headerTitle}>Complete Payment</Text>
           </View>
-          <TouchableOpacity onPress={onCancel} style={styles.cancelBtn}>
+          <TouchableOpacity
+            onPress={onCancel}
+            style={styles.cancelBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
 
-        {loadingOrder ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.loadingText}>Initializing Razorpay Secure Checkout...</Text>
-          </View>
-        ) : initError ? (
-          <View style={styles.errorContainer}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={48} color={colors.error} />
-            <Text style={styles.errorTitle}>Checkout Initialization Error</Text>
-            <Text style={styles.errorDescription}>{initError}</Text>
-            <TouchableOpacity onPress={onCancel} style={styles.retryBtn}>
-              <Text style={styles.retryBtnText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        ) : paymentHtml ? (
-          <WebView
-            originWhitelist={['*']}
-            source={{ html: paymentHtml, baseUrl: 'https://aurasutra.com' }}
-            javaScriptEnabled
-            domStorageEnabled
-            onMessage={handleWebViewMessage}
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.primary} />
-              </View>
-            )}
-          />
-        ) : null}
-      </SafeAreaView>
+        {/* Content Body */}
+        <View style={styles.contentContainer}>
+          {loadingOrder ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingText}>Initializing Razorpay Secure Checkout...</Text>
+            </View>
+          ) : initError ? (
+            <View style={styles.errorContainer}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={48} color={colors.error} />
+              <Text style={styles.errorTitle}>Checkout Initialization Error</Text>
+              <Text style={styles.errorDescription}>{initError}</Text>
+              <TouchableOpacity onPress={onCancel} style={styles.retryBtn}>
+                <Text style={styles.retryBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          ) : paymentHtml ? (
+            <WebView
+              originWhitelist={['*']}
+              source={{ html: paymentHtml, baseUrl: 'https://aurasutra.com' }}
+              javaScriptEnabled
+              domStorageEnabled
+              onMessage={handleWebViewMessage}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+              )}
+            />
+          ) : null}
+        </View>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safeAreaContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  contentContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
   headerBar: {
     flexDirection: 'row',
